@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:air_files/screens/about.dart';
 import 'package:air_files/screens/login_screen.dart';
 import 'package:air_files/utils/api.dart';
 import 'package:air_files/utils/custom_list_tile.dart';
@@ -13,7 +14,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/toast_message.dart';
@@ -79,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final dio = Dio();
 
     final response = await dio.get(
-      'http://192.168.1.90:3000/api/userWeb/downloadUserFiles',
+      'http://13.234.59.167:3000/api/userWeb/downloadUserFiles',
       options: Options(
         responseType: ResponseType.bytes,
         headers: {
@@ -103,6 +103,8 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
       }
+
+      return;
     }
 
     // read response bytes. extract to a temp dir
@@ -130,18 +132,14 @@ class _HomeScreenState extends State<HomeScreen> {
             final String downloadsPath = downloadsDir!.path;
 
             final newFile = await file.copy('$downloadsPath/$filename');
-            showToast('File downloaded to $downloadsPath/$filename');
-          } else if (Platform.isAndroid) {
-            if (await Permission.storage.request().isGranted) {
-              final Directory? downloadsDir =
-                  await getExternalStorageDirectory();
-              final String downloadsPath = downloadsDir!.path;
+            showToast('File downloaded!');
 
-              final newFile = await file.copy('$downloadsPath/$filename');
-              showToast('File downloaded to $downloadsPath/$filename');
-            } else {
-              showToast('Permission denied');
-            }
+          } else if (Platform.isAndroid) {
+            final Directory? downloadsDir = await getExternalStorageDirectory();
+            final String downloadsPath = downloadsDir!.path;
+
+            final newFile = await file.copy('$downloadsPath/$filename');
+            showToast('File downloaded to $downloadsPath/$filename');
           } else {
             await FileSaver.instance.saveFile(filename, file.readAsBytesSync(),
                 filename.split(".").last.toString());
@@ -180,7 +178,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final dio = Dio();
 
     final response = await dio.get(
-      'http://192.168.1.90:3000/api/userWeb/getUserFiles',
+      'http://13.234.59.167:3000/api/userWeb/getUserFiles',
       options: Options(
         headers: {
           'Content-Type': 'application/json',
@@ -228,6 +226,65 @@ class _HomeScreenState extends State<HomeScreen> {
     getUserFiles();
   }
 
+  Future<String?> compressAndSendFilesWeb(List<PlatformFile> files) async {
+    Stopwatch stopwatch = Stopwatch();
+    stopwatch.start();
+    setState(() {
+      _isLoading = true;
+    });
+
+    // archive all files into a single archive without using temp dir
+    final archive = Archive();
+    for (final file in files) {
+      archive.addFile(ArchiveFile(file.name, file.size, file.bytes!));
+    }
+
+    final compressedFileBytes = ZipEncoder().encode(archive);
+    // send as multipart/form-data
+
+    try {
+      final dio = Dio();
+      final formData = FormData.fromMap({
+        'files': MultipartFile.fromBytes(
+          compressedFileBytes!,
+          filename: 'compressed.zip',
+        ),
+        'userFiles': jsonEncode(_files!
+            .map((e) => {
+                  'fileName': e.name,
+                  'fileSize': e.size,
+                })
+            .toList()),
+      });
+
+      final response = await dio.post(
+        'http://13.234.59.167:3000/api/userWeb/upload',
+        options: Options(
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            'Authorization': 'Bearer ${Api().getLoginToken()}',
+          },
+        ),
+        data: formData,
+      );
+
+      setState(() {
+        _isLoading = false;
+      });
+
+      if (response.statusCode == 200) {
+        print(stopwatch.elapsed.inSeconds);
+        return "OK";
+      } else {
+        return response.statusMessage.toString();
+      }
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
   Future<String?> compressAndSendFiles(List<File> files) async {
     Stopwatch stopwatch = Stopwatch();
     stopwatch.start();
@@ -263,7 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
       final response = await dio.post(
-        'http://192.168.1.90:3000/api/userWeb/upload',
+        'http://13.234.59.167:3000/api/userWeb/upload',
         options: Options(
           headers: {
             'Content-Type': 'multipart/form-data',
@@ -305,23 +362,42 @@ class _HomeScreenState extends State<HomeScreen> {
           if (_files == null) {
             _pickFiles();
           } else {
-            compressAndSendFiles(_files!.map((e) => File(e.path!)).toList())
-                .then((value) => {
-                      if (value == "OK")
-                        {
-                          showToast("Files Uploaded Successfully"),
-                          setState(() {
-                            _files = null;
-                          }),
-                        }
-                      else
-                        {
-                          showToast("Error Uploading Files"),
-                          setState(() {
-                            _files = null;
-                          })
-                        }
-                    });
+            if (kIsWeb) {
+              compressAndSendFilesWeb(_files!).then((value) => {
+                    if (value == "OK")
+                      {
+                        showToast("Files Uploaded Successfully"),
+                        setState(() {
+                          _files = null;
+                        }),
+                      }
+                    else
+                      {
+                        showToast("Error Uploading Files"),
+                        setState(() {
+                          _files = null;
+                        })
+                      }
+                  });
+            } else {
+              compressAndSendFiles(_files!.map((e) => File(e.path!)).toList())
+                  .then((value) => {
+                        if (value == "OK")
+                          {
+                            showToast("Files Uploaded Successfully"),
+                            setState(() {
+                              _files = null;
+                            }),
+                          }
+                        else
+                          {
+                            showToast("Error Uploading Files"),
+                            setState(() {
+                              _files = null;
+                            })
+                          }
+                      });
+            }
           }
         },
         label: Text(
@@ -383,17 +459,28 @@ class _HomeScreenState extends State<HomeScreen> {
                                   : null)),
                     ),
                   ),
+                  leading: IconButton(
+                    icon: const Icon(Icons.temple_hindu_rounded),
+                    onPressed: () {
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) => const AboutScreen()));
+                    },
+                  ),
                   actions: [
                     IconButton(
                       icon: const Icon(Icons.refresh_rounded),
                       onPressed: () {
                         setState(() {
-                          isLoading = true;
+                          loadingUserFiles = true;
                         });
                         getUserFiles();
-                        sleep(const Duration(seconds: 2));
+                        if (!kIsWeb) {
+                          sleep(const Duration(seconds: 2));
+                        }
                         setState(() {
-                          isLoading = false;
+                          loadingUserFiles = false;
                         });
                       },
                     ),
@@ -403,7 +490,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             isLoading = true;
                           });
                           _logout();
-                          sleep(const Duration(seconds: 2));
+                          if (!kIsWeb) {
+                            sleep(const Duration(seconds: 2));
+                          }
                           Navigator.push(
                               context,
                               MaterialPageRoute(

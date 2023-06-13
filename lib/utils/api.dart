@@ -17,7 +17,7 @@ class Api {
     // get secret_token from response
     try {
       final response = await _dio.post(
-        "http://192.168.1.90:3000/api/userWeb/login",
+        "http://13.234.59.167:3000/api/userWeb/login",
         data: {
           "userEmail": userEmail,
           "userPassword": userPassword,
@@ -49,7 +49,7 @@ class Api {
       String fullName, String userEmail, String userPassword) async {
     try {
       final response = await _dio.post(
-        "http://192.168.1.90:3000/api/userWeb/register",
+        "http://13.234.59.167:3000/api/userWeb/register",
         data: {
           "fullName": fullName,
           "userEmail": userEmail,
